@@ -1,5 +1,5 @@
 let currentPage = 0;
-let currentView = "new"; // new | saved | hidden | filtered
+let currentView = "new"; // new | favorites | saved | hidden | filtered
 const PAGE_SIZE = 50;
 let searchTimeout = null;
 
@@ -21,6 +21,7 @@ async function loadStats() {
     document.getElementById("countSaved").textContent = s.saved_count;
     document.getElementById("countHidden").textContent = s.hidden_count;
     document.getElementById("countFiltered").textContent = s.filtered_count;
+    document.getElementById("countFavorites").textContent = s.favorite_count;
 
     // Source dropdown follows whatever is actually in the DB.
     const sel = document.getElementById("sourceFilter");
@@ -66,6 +67,7 @@ async function loadJobs(page = 0) {
       const empty = {
         new: "No jobs found. Try adjusting filters or scan for new jobs.",
         saved: "Nothing saved yet.",
+        favorites: "No favorites yet. Tap the ☆ on a job to star it.",
         hidden: "Nothing hidden. Jobs you hide land here so you can bring them back.",
         filtered: "Nothing filtered out by the rules.",
       }[currentView];
@@ -124,6 +126,13 @@ function renderTags(job) {
   return tags;
 }
 
+// Star toggle — shown on every card, including the Applied panel.
+function starButton(job) {
+  const on = job.favorite === 1;
+  return `<button class="star${on ? " on" : ""}" title="${on ? "Remove from favorites" : "Add to favorites"}"
+    onclick="event.stopPropagation();toggleFavorite(${job.id},${on ? 0 : 1})">${on ? "★" : "☆"}</button>`;
+}
+
 // Buttons change with where the job currently lives.
 function actionButtons(job) {
   const b = (cls, label, onclick, title = "") =>
@@ -134,6 +143,8 @@ function actionButtons(job) {
   if (job.filter_reason && job.status === "new")
     return info + show + b("btn-save", "Rescue", `updateStatus(${job.id},'saved')`, "Move to Saved — rules won't touch it again");
   if (job.status === "hidden") return info + show + b("btn-save", "Unhide", `updateStatus(${job.id},'new')`);
+  if (["applied", "interview", "rejected"].includes(job.status)) // seen in Favorites
+    return `<span class="applied-status status-${job.status}">${job.status}</span>` + info + show;
   if (job.status === "saved")
     return info + show + applied + b("btn-hide", "Unsave", `updateStatus(${job.id},'new')`) + b("btn-hide", "Hide", `updateStatus(${job.id},'hidden')`);
   return info + show + applied + b("btn-save", "Save", `updateStatus(${job.id},'saved')`) + b("btn-hide", "Hide", `updateStatus(${job.id},'hidden')`);
@@ -149,7 +160,7 @@ function renderJobCard(job, isAppliedPanel) {
     return `
       <div class="job-card tier-${tier}">
         <div class="job-info">
-          <div class="job-title">${escapeHtml(job.title)}</div>
+          <div class="job-title">${starButton(job)}${escapeHtml(job.title)}</div>
           <div class="job-meta">
             <span>${escapeHtml(job.company || "")}</span>
             <span>${escapeHtml(job.location || "")}</span>
@@ -170,7 +181,7 @@ function renderJobCard(job, isAppliedPanel) {
     <div class="job-card tier-${ruled ? "X" : tier}">
       ${badge}
       <div class="job-info">
-        <div class="job-title">${escapeHtml(job.title)}</div>
+        <div class="job-title">${starButton(job)}${escapeHtml(job.title)}</div>
         <div class="job-meta">
           <span>${escapeHtml(job.company || "Unknown")}</span>
           <span>${escapeHtml(job.location || "Unknown")}</span>
@@ -221,6 +232,16 @@ async function updateStatus(id, status, { undoable = true } = {}) {
   }
 }
 
+async function toggleFavorite(id, favorite) {
+  await fetch(`/api/jobs/${id}/favorite`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ favorite }),
+  });
+  refreshAll();
+  if (document.getElementById("jobModal").classList.contains("active")) showDetail(id);
+}
+
 let toastTimer = null;
 function showToast(text, onUndo) {
   const toast = document.getElementById("toast");
@@ -255,7 +276,7 @@ async function showDetail(id) {
     }[job.status] || "";
 
     document.getElementById("modalBody").innerHTML = `
-      <h2>${escapeHtml(job.title)}</h2>
+      <h2>${starButton(job)}${escapeHtml(job.title)}</h2>
       <div class="detail-company">${escapeHtml(job.company || "Unknown")}</div>
       <div class="detail-head">
         <div class="job-rating rating-${tier}"><span class="num">${fmtScore(job.score)}</span><span class="tier">TIER ${tier}</span></div>

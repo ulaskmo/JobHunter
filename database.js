@@ -70,6 +70,8 @@ for (const col of [
   // Set when the scorer's rules exclude a job (US-only, senior, …). Kept
   // separate from status='hidden', which is only ever the user's own Hide.
   "ALTER TABLE jobs ADD COLUMN filter_reason TEXT",
+  // Star — independent of status, so a favourite stays starred after applying.
+  "ALTER TABLE jobs ADD COLUMN favorite INTEGER DEFAULT 0",
 ]) {
   try { db.exec(col); } catch (e) { /* column already exists */ }
 }
@@ -133,6 +135,7 @@ const getStats = db.prepare(`
     SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_count,
     SUM(CASE WHEN status = 'saved' THEN 1 ELSE 0 END) as saved_count,
     SUM(CASE WHEN status = 'hidden' THEN 1 ELSE 0 END) as hidden_count,
+    SUM(CASE WHEN favorite = 1 THEN 1 ELSE 0 END) as favorite_count,
     SUM(CASE WHEN filter_reason IS NOT NULL AND status = 'new' AND is_expired = 0 THEN 1 ELSE 0 END) as filtered_count,
     SUM(CASE WHEN score >= 80 AND status = 'new' AND filter_reason IS NULL AND is_expired = 0 THEN 1 ELSE 0 END) as priority_count
   FROM jobs

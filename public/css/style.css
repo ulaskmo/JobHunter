@@ -207,7 +207,22 @@ button:hover, .btn-link:hover { background: var(--line-soft); border-color: #d6d
 .tag-remote { color: var(--a); background: #eff6ff; }
 .tag-source { background: none; color: var(--faint); padding-left: 2px; }
 
-.job-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.job-actions { display: flex; gap: 4px; flex-shrink: 0; align-items: center; }
+.job-actions .applied-status { margin-right: 6px; text-transform: capitalize; }
+
+/* Favorite star, inline before the title */
+.star {
+  border: none;
+  background: none;
+  padding: 0 6px 0 0;
+  font-size: 15px;
+  line-height: 1;
+  color: #d6d3d1;
+  vertical-align: -1px;
+}
+.star:hover { background: none; color: #ca8a04; }
+.star.on { color: #eab308; }
+.modal-content h2 .star { font-size: 20px; }
 .job-actions button { padding: 5px 10px; font-size: 12px; }
 
 .btn-info { width: 28px; padding: 5px 0 !important; font-style: italic; font-family: Georgia, serif; }

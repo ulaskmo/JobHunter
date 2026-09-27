@@ -71,7 +71,10 @@ function buildJobFilters({ status, source, search, priority, location, time }) {
   const where = [];
   const params = [];
 
-  if (status === "filtered") {
+  if (status === "favorites") {
+    // Every starred job, whatever its status — applied ones included.
+    where.push("favorite = 1");
+  } else if (status === "filtered") {
     // Jobs the scorer's rules removed — for checking a rule isn't too strict.
     where.push("status = 'new' AND filter_reason IS NOT NULL AND is_expired = 0");
   } else if (status && status !== "all") {
@@ -161,6 +164,12 @@ app.put("/api/jobs/:id/status", (req, res) => {
     return res.status(400).json({ error: "Invalid status" });
   }
   updateJobStatus.run({ id: req.params.id, status });
+  res.json({ success: true });
+});
+
+// Star / unstar a job
+app.put("/api/jobs/:id/favorite", (req, res) => {
+  db.prepare("UPDATE jobs SET favorite = ? WHERE id = ?").run(req.body.favorite ? 1 : 0, req.params.id);
   res.json({ success: true });
 });
 
