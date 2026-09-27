@@ -34,14 +34,14 @@ function initTelegram() {
         `New: ${stats.new_count}\n` +
         `Applied: ${stats.applied_count}\n` +
         `Interviews: ${stats.interview_count}\n` +
-        `Priority (score 75+): ${stats.priority_count}\n` +
+        `S tier (8.0+): ${stats.priority_count}\n` +
         `Saved: ${stats.saved_count}`,
         { parse_mode: "HTML" }
       );
 
     } else if (text === "/priority") {
       const jobs = db.prepare(
-        "SELECT * FROM jobs WHERE score >= 75 AND status = 'new' ORDER BY score DESC LIMIT 10"
+        "SELECT * FROM jobs WHERE score >= 80 AND status = 'new' AND filter_reason IS NULL AND is_expired = 0 ORDER BY score DESC LIMIT 10"
       ).all();
       if (jobs.length === 0) {
         await bot.sendMessage(msg.chat.id, "No new priority jobs right now.");
@@ -51,7 +51,7 @@ function initTelegram() {
       for (const job of jobs) {
         msg_text += `<b>${job.title}</b>\n`;
         msg_text += `${job.company} - ${job.location}\n`;
-        msg_text += `Score: ${job.score} | ${job.source}\n`;
+        msg_text += `Score: ${(job.score / 10).toFixed(1)} · ${job.rating} | ${job.source}\n`;
         msg_text += `${job.url}\n\n`;
       }
       await bot.sendMessage(msg.chat.id, msg_text, { parse_mode: "HTML", disable_web_page_preview: true });
@@ -68,7 +68,7 @@ function initTelegram() {
       for (const job of jobs) {
         msg_text += `<b>${job.title}</b>\n`;
         msg_text += `${job.company} - ${job.location}\n`;
-        msg_text += `Score: ${job.score} | ${job.source}\n\n`;
+        msg_text += `Score: ${(job.score / 10).toFixed(1)} · ${job.rating} | ${job.source}\n\n`;
       }
       await bot.sendMessage(msg.chat.id, msg_text, { parse_mode: "HTML" });
 
@@ -109,7 +109,7 @@ async function notifyPriorityJobs(jobs) {
     for (const job of shown.slice(i, i + 10)) {
       msg += `<b>${esc(job.title)}</b>\n`;
       msg += `${esc(job.company)} - ${esc(job.location)}\n`;
-      msg += `Score: ${job.score} | ${job.source}\n`;
+      msg += `Score: ${(job.score / 10).toFixed(1)} · ${job.rating} | ${job.source}\n`;
       msg += `${esc(job.url)}\n\n`;
     }
     await sendAlert(msg);

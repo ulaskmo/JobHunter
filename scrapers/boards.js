@@ -23,7 +23,7 @@ const GREENHOUSE = [
   "scaleai", "databricks", "twilio", "notion",
   // Turkey-active (verified 2026-09: Trendyol/Insider/Peak/Getir are NOT on
   // Greenhouse — "peak" and "insider" tokens belong to unrelated US companies)
-  "dreamgames",
+  "dreamgames", "goodjobgames",
 ];
 
 const LEVER = [
@@ -35,14 +35,22 @@ const LEVER = [
   "palantir", "anysphere",
   // Turkey (verified 2026-09)
   "trendyol", "insiderone", "peakgames", "dreamgames", "iyzico", "picus",
-  "commencis", "dataroid", "ciceksepeti", "getmidas",
+  "commencis", "dataroid", "ciceksepeti", "getmidas", "loopgames",
 ];
 
 // Ashby: https://api.ashbyhq.com/posting-api/job-board/{token}
-const ASHBY = ["codeway"];
+const ASHBY = ["codeway", "agave", "biggergames"];
 
 // SmartRecruiters: company id, filtered to Turkey postings.
-const SMARTRECRUITERS = ["deliveryhero"]; // Yemeksepeti / Delivery Hero TR
+const SMARTRECRUITERS = ["deliveryhero", "n11"]; // Yemeksepeti / Delivery Hero TR, n11
+
+// Recruitee: https://{token}.recruitee.com/api/offers/
+const RECRUITEE = ["obilet"];
+
+// Turkish-company tokens above are listed in scorer.js TR_COMPANIES (S tier).
+// Probed 2026-09-27 and not on any public ATS API: Getir, Hepsiburada, Papara,
+// Sahibinden, Turkcell, Jotform, Param — they post via LinkedIn/Kariyer, which
+// linkedin_tr.js already covers.
 
 function normaliseJob(raw, company, source) {
   return { ...raw, source, company };
@@ -88,7 +96,7 @@ async function scrapeLeverCompany(token) {
       j.categories?.allLocations?.join(", ") ||
       "";
     const description = stripHTML(j.descriptionPlain || j.description || "").slice(0, 2000);
-    const isRemote = /\bremote\b|\banywhere\b/i.test(location + " " + (j.text || "") + " " + description) ? 1 : 0;
+    const isRemote = /\bremote\b|\banywhere\b/i.test(location + " " + (j.text || "") + " " + (j.workplaceType || "")) ? 1 : 0;
     return {
       external_id: j.id,
       source: "lever",
@@ -140,7 +148,7 @@ async function scrapeSmartRecruitersCompany(company) {
     external_id: j.id,
     source: "smartrecruiters",
     title: j.name || "Unknown",
-    company: j.company?.name || company,
+    company, // token — matches scorer TR_COMPANIES
     location: [j.location?.city, "Türkiye"].filter(Boolean).join(", "),
     salary: null,
     description: "",
@@ -150,6 +158,29 @@ async function scrapeSmartRecruitersCompany(company) {
     job_type: j.typeOfEmployment?.label || "full-time",
     experience_level: j.experienceLevel?.label || null,
     is_remote: j.location?.remote ? 1 : 0,
+    is_easy_apply: 0,
+    score: 0,
+    rating: "+",
+    score_breakdown: "",
+  }));
+}
+
+async function scrapeRecruiteeCompany(token) {
+  const data = await fetchJSON(`https://${token}.recruitee.com/api/offers/`);
+  return (data?.offers || []).map((j) => ({
+    external_id: String(j.id),
+    source: "recruitee",
+    title: j.title || "Unknown",
+    company: token,
+    location: j.location || [j.city, j.country].filter(Boolean).join(", "),
+    salary: null,
+    description: stripHTML(j.description || "").slice(0, 2000),
+    url: j.careers_url,
+    posted_date: j.published_at || j.created_at || null,
+    tags: j.department || "",
+    job_type: j.employment_type_code || "full-time",
+    experience_level: j.experience_code || null,
+    is_remote: j.remote ? 1 : 0,
     is_easy_apply: 0,
     score: 0,
     rating: "+",
@@ -197,6 +228,7 @@ async function scrapeBoards() {
   for (const [prefix, list, fn] of [
     ["ab", ASHBY, scrapeAshbyCompany],
     ["sr", SMARTRECRUITERS, scrapeSmartRecruitersCompany],
+    ["rc", RECRUITEE, scrapeRecruiteeCompany],
   ]) {
     for (const token of list) {
       try {

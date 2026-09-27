@@ -184,7 +184,8 @@ async function scrapeLinkedIn() {
               return {
                 title: titleEl?.textContent?.trim() || "",
                 company: companyEl?.textContent?.trim() || "",
-                location: locationEl?.textContent?.trim() || "",
+                // The metadata node also holds "1 week ago" etc. on later lines.
+                location: (locationEl?.textContent || "").trim().split("\n")[0].trim(),
                 url: linkEl?.href || "",
                 posted_date: timeEl?.getAttribute("datetime") || "",
                 external_id: card.getAttribute("data-entity-urn") || linkEl?.href || "",
@@ -212,7 +213,7 @@ async function scrapeLinkedIn() {
             description: `${card.title} at ${card.company} - ${card.location}`,
             url: jobUrl,
             posted_date: card.posted_date || null,
-            tags: query.keywords,
+            tags: query.remote ? `${query.keywords} remote` : query.keywords,
             job_type: "full-time",
             experience_level: null,
             is_remote: query.remote ? 1 : 0,
@@ -290,9 +291,13 @@ async function scrapeLinkedIn() {
               const description = details.replace(/\s+/g, " ").trim().slice(0, 5000);
               updateDesc.run({ id: job.id, description });
               // Rescore with the richer description — can bump or demote the job
-              const rescored = scoreJob({ ...job, description });
-              if (!rescored.hidden) {
+              const rescored = scoreJob({ ...job, source: "linkedin", description });
+              if (rescored.hidden) {
+                // e.g. the full text reveals "must be a US citizen"
+                db.prepare("UPDATE jobs SET filter_reason = ? WHERE id = ?").run(rescored.filter_reason, job.id);
+              } else {
                 updateJobScore.run({ id: job.id, score: rescored.score, score_breakdown: rescored.breakdown });
+                db.prepare("UPDATE jobs SET rating = ? WHERE id = ?").run(rescored.rating, job.id);
               }
             }
           } catch (e) { /* per-job failure is fine */ }

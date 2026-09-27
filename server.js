@@ -4,7 +4,7 @@ const fs = require("fs");
 const cron = require("node-cron");
 require("dotenv").config();
 
-const { db, getJobs, getJobById, getStats, updateJobStatus, searchJobs, logScrape } = require("./database");
+const { db, POSTED_AT, getJobById, getStats, updateJobStatus, logScrape } = require("./database");
 const { scrapeRemoteOK } = require("./scrapers/remoteok");
 const { scrapeLinkedIn } = require("./scrapers/linkedin");
 const { scrapeKariyer } = require("./scrapers/kariyer");
@@ -18,6 +18,7 @@ const { scrapeBoards } = require("./scrapers/boards");
 const { scrapeIrishJobs } = require("./scrapers/irishjobs");
 const { scrapeLinkedInTR } = require("./scrapers/linkedin_tr");
 const { scrapeWorkable } = require("./scrapers/workable");
+const { scrapeLinkedInAbroad, enrichLinkedInDescriptions } = require("./scrapers/linkedin_tr");
 const { initTelegram, sendAlert, notifyPriorityJobs, stopTelegram } = require("./telegram");
 
 // Rotate server.log if it's grown past 5 MB
@@ -52,7 +53,10 @@ const LOCATION_PATTERNS = {
     "%germany%", "%berlin%", "%netherlands%", "%amsterdam%", "%france%", "%paris%",
     "%spain%", "%portugal%", "%sweden%", "%europe%"
   ],
-  usa: ["%usa%", "%united states%", "%new york%", "%san francisco%", "%california%"],
+  canada: ["%canada%", "%toronto%", "%vancouver%", "%montreal%", "%ontario%"],
+  singapore: ["%singapore%"],
+  gulf: ["%united arab emirates%", "%dubai%", "%abu dhabi%", "%qatar%", "%doha%", "%saudi%", "%riyadh%"],
+  anz: ["%australia%", "%sydney%", "%melbourne%", "%new zealand%", "%auckland%"],
 };
 
 const TIME_MAP = {
@@ -74,9 +78,9 @@ function buildJobFilters({ status, source, search, priority, location, time }) {
     where.push("status != 'hidden'");
   }
 
-  // Expired/closed jobs are hidden from every default view. Pass
-  // ?includeExpired=1 to override.
-  where.push("is_expired = 0");
+  // Rules (US-only, senior…) and expiry only prune the "new" feed — anything
+  // you saved, applied to or hid yourself always stays visible.
+  if (!status || status === "new" || status === "all") where.push("filter_reason IS NULL AND is_expired = 0");
 
   if (source && source !== "all") {
     where.push("source = ?");
@@ -93,12 +97,13 @@ function buildJobFilters({ status, source, search, priority, location, time }) {
     }
   }
 
-  if (priority === "high") where.push("score >= 75");
-  else if (priority === "medium") where.push("score >= 55 AND score < 75");
-  else if (priority === "low") where.push("score < 55");
+  if (priority === "S") where.push("score >= 80");
+  else if (priority === "A") where.push("score >= 60 AND score < 80");
+  else if (priority === "B") where.push("score < 60");
 
+  // Filter on when the job was POSTED, not when we happened to scrape it.
   if (time && time !== "all" && TIME_MAP[time]) {
-    where.push("scraped_at > datetime('now', ?)");
+    where.push(`julianday(${POSTED_AT}) > julianday('now', ?)`);
     params.push(TIME_MAP[time]);
   }
 
@@ -116,9 +121,10 @@ app.get("/api/jobs", (req, res) => {
   const { sort, limit, offset } = req.query;
   const { whereClause, params } = buildJobFilters(req.query);
 
-  let orderBy = "ORDER BY score DESC, scraped_at DESC";
-  if (sort === "date") orderBy = "ORDER BY scraped_at DESC";
+  let orderBy = `ORDER BY score DESC, julianday(${POSTED_AT}) DESC`;
+  if (sort === "date") orderBy = `ORDER BY julianday(${POSTED_AT}) DESC`;
   else if (sort === "company") orderBy = "ORDER BY company ASC";
+  else if (sort === "applied") orderBy = "ORDER BY applied_at DESC";
 
   const lim = Math.min(Math.max(parseInt(limit) || 50, 1), 500);
   const off = Math.max(parseInt(offset) || 0, 0);
@@ -204,6 +210,7 @@ async function runAllScrapers({ onlySource } = {}) {
     ["irishjobs",      scrapeIrishJobs,  "fast"],
     ["linkedin_tr",    scrapeLinkedInTR, "fast"],
     ["workable",       scrapeWorkable,   "fast"],
+    ["linkedin_abroad", scrapeLinkedInAbroad, "fast"],
     ["linkedin",       scrapeLinkedIn,   "playwright"],
     ["toptalent",      scrapeToptalent,  "playwright"],
     ["kariyer",        scrapeKariyer,    "fast"], // no-op (PX wall)
@@ -239,19 +246,19 @@ async function runAllScrapers({ onlySource } = {}) {
       }
     }
 
-    // Mark LinkedIn rows as expired when their real posted_date is > 30 days old
+    // Fill in real descriptions for the best LinkedIn cards and rescore them.
+    if (!onlySource) {
+      try { await enrichLinkedInDescriptions(); }
+      catch (e) { errors.push(`enrich: ${e.message}`); }
+    }
+
+    // Expire anything posted more than 30 days ago, from every source.
     try {
       const result = db.prepare(`
         UPDATE jobs SET is_expired = 1
-        WHERE source = 'linkedin'
-          AND is_expired = 0
-          AND posted_date IS NOT NULL
-          AND posted_date != ''
-          AND julianday('now') - julianday(posted_date) > 30
+        WHERE is_expired = 0 AND julianday('now') - julianday(${POSTED_AT}) > 30
       `).run();
-      if (result.changes > 0) {
-        console.log(`Marked ${result.changes} stale LinkedIn jobs as expired.`);
-      }
+      if (result.changes > 0) console.log(`Marked ${result.changes} stale jobs as expired.`);
     } catch (e) { /* non-fatal */ }
 
     const afterStats = getStats.get();
@@ -274,7 +281,7 @@ async function runAllScrapers({ onlySource } = {}) {
     const tr = LOCATION_PATTERNS.turkey;
     const alertJobs = db.prepare(
       `SELECT * FROM jobs WHERE notified_at IS NULL AND status = 'new' AND is_expired = 0
-       AND (score >= 75 OR ${tr.map(() => "LOWER(location) LIKE ?").join(" OR ")})
+       AND filter_reason IS NULL AND (score >= 80 OR ${tr.map(() => "LOWER(location) LIKE ?").join(" OR ")})
        ORDER BY score DESC`
     ).all(...tr);
     if (alertJobs.length > 0) await notifyPriorityJobs(alertJobs);

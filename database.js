@@ -67,6 +67,9 @@ db.exec(`
 for (const col of [
   "ALTER TABLE jobs ADD COLUMN is_expired INTEGER DEFAULT 0",
   "ALTER TABLE jobs ADD COLUMN verified_at TEXT",
+  // Set when the scorer's rules exclude a job (US-only, senior, …). Kept
+  // separate from status='hidden', which is only ever the user's own Hide.
+  "ALTER TABLE jobs ADD COLUMN filter_reason TEXT",
 ]) {
   try { db.exec(col); } catch (e) { /* column already exists */ }
 }
@@ -78,6 +81,13 @@ try {
   db.exec("UPDATE jobs SET notified_at = datetime('now')");
 } catch (e) { /* column already exists */ }
 
+// LinkedIn cards used to capture "\n\n   1 week ago" into the location.
+db.exec(`UPDATE jobs SET location = trim(substr(location, 1, instr(location, char(10)) - 1))
+         WHERE instr(location, char(10)) > 0`);
+
+// Posting date, falling back to scrape date — what "Past week" etc. filter on.
+const POSTED_AT = "COALESCE(NULLIF(posted_date, ''), scraped_at)";
+
 // ─── Prepared Statements ──────────────────────────────────────────────────────
 const insertJob = db.prepare(`
   INSERT OR IGNORE INTO jobs (external_id, source, title, company, location, salary, description, url, posted_date, tags, job_type, experience_level, is_remote, is_easy_apply, score, rating, score_breakdown)
@@ -88,9 +98,19 @@ const updateJobScore = db.prepare(`
   UPDATE jobs SET score = @score, score_breakdown = @score_breakdown WHERE id = @id
 `);
 
-const updateJobStatus = db.prepare(`
+const setJobStatus = db.prepare(`
   UPDATE jobs SET status = @status, applied_at = CASE WHEN @status = 'applied' THEN datetime('now') ELSE applied_at END WHERE id = @id
 `);
+const insertApplication = db.prepare(`INSERT INTO applications (job_id, method, status) VALUES (?, 'manual', ?)`);
+
+// Status change + application log. Every move into applied/interview/rejected
+// is recorded so outcomes can be tracked per source later.
+const updateJobStatus = {
+  run: db.transaction(({ id, status }) => {
+    setJobStatus.run({ id, status });
+    if (["applied", "interview", "rejected"].includes(status)) insertApplication.run(id, status);
+  }),
+};
 
 const getJobs = db.prepare(`
   SELECT * FROM jobs ORDER BY score DESC, scraped_at DESC
@@ -106,14 +126,14 @@ const getJobById = db.prepare(`
 
 const getStats = db.prepare(`
   SELECT
-    COUNT(*) as total,
-    SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) as new_count,
+    SUM(CASE WHEN filter_reason IS NULL THEN 1 ELSE 0 END) as total,
+    SUM(CASE WHEN status = 'new' AND filter_reason IS NULL AND is_expired = 0 THEN 1 ELSE 0 END) as new_count,
     SUM(CASE WHEN status = 'applied' THEN 1 ELSE 0 END) as applied_count,
     SUM(CASE WHEN status = 'interview' THEN 1 ELSE 0 END) as interview_count,
     SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_count,
     SUM(CASE WHEN status = 'saved' THEN 1 ELSE 0 END) as saved_count,
     SUM(CASE WHEN status = 'hidden' THEN 1 ELSE 0 END) as hidden_count,
-    SUM(CASE WHEN score >= 70 THEN 1 ELSE 0 END) as priority_count
+    SUM(CASE WHEN score >= 80 AND status = 'new' AND filter_reason IS NULL AND is_expired = 0 THEN 1 ELSE 0 END) as priority_count
   FROM jobs
 `);
 
@@ -142,6 +162,7 @@ function ingestJob(job) {
 
 module.exports = {
   db,
+  POSTED_AT,
   ingestJob,
   insertJob,
   updateJobScore,

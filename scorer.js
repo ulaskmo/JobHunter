@@ -1,22 +1,17 @@
 // ─── Job Scoring Engine ───────────────────────────────────────────────────────
 //
-// PREFERENCES (from survey):
+// Score is 0–100 in the DB, shown as 0.0–10.0. Each job lands in a tier band,
+// then "fit" (stack, level, AI) places it inside the band:
 //
-// S TIER (best):
-//   - Remote + Ireland or Turkey/Istanbul
-//   - In-office Ireland (might negotiate remote)
-//   - In-office Turkey/Istanbul
+//   S  8.0–10.0  Ireland/Turkey (remote or on-site) + stack match,
+//                or any Turkey/remote role at a top Turkish company
+//   A  6.0–7.9   Remote anywhere (not US-restricted), cyber security,
+//                or Ireland/Turkey without a stack match
+//   B  4.0–5.9   On-site in UK/Europe/Canada/Singapore/Gulf/ANZ/Japan
 //
-// A TIER (great):
-//   - Remote anywhere (USA, UK, Europe, or unspecified)
-//
-// EXCLUDED (auto-hide):
-//   - In-office anywhere except Ireland or Turkey
-//   - Countries not in: Ireland, Turkey, UK, Europe, USA (or Remote)
-//   - Non-software/tech roles
-//   - Senior / Staff / Principal / Lead / Manager titles (user is a junior)
-//
-// BONUS: Junior/Entry +++ | AI/ML +++ | Skills match ++
+// HIDDEN: US-only (citizenship, clearance, green card, US-located), on-site
+// elsewhere, senior/lead/manager titles, non-software titles.
+// Requiring 5+ years demotes one tier.
 
 const LOCATIONS = {
   ireland: [
@@ -47,7 +42,10 @@ const LOCATIONS = {
     "denmark", "copenhagen", "norway", "oslo", "finland", "helsinki",
     "poland", "warsaw", "krakow", "czech", "prague",
     "austria", "vienna", "switzerland", "zurich", "geneva",
-    "belgium", "brussels", "italy", "milan", "rome",
+    "belgium", "brussels", "italy", "milan", "rome", "luxembourg",
+    "estonia", "tallinn", "latvia", "riga", "lithuania", "vilnius",
+    "romania", "bucharest", "hungary", "budapest", "greece", "athens",
+    "cyprus", "limassol", "malta", "iceland",
     "europe",
   ],
   usa: [
@@ -55,6 +53,18 @@ const LOCATIONS = {
     "los angeles", "chicago", "seattle", "boston", "austin", "denver",
     "miami", "atlanta", "portland", "california", "texas", "washington"
   ],
+  canada: [
+    "canada", "toronto", "vancouver", "montreal", "montréal", "ottawa",
+    "calgary", "edmonton", "waterloo", "ontario", "british columbia", "quebec",
+  ],
+  singapore: ["singapore"],
+  gulf: [
+    "united arab emirates", "uae", "dubai", "abu dhabi", "sharjah", "ajman",
+    "qatar", "doha", "saudi arabia", "riyadh", "jeddah", "bahrain", "manama",
+    "kuwait", "sultanate of oman", "muscat",
+  ],
+  anz: ["australia", "sydney", "melbourne", "brisbane", "perth", "new zealand", "auckland", "wellington"],
+  asia: ["japan", "tokyo", "hong kong", "south korea", "seoul"],
   remote: [
     "remote", "work from home", "wfh", "distributed", "anywhere",
     "fully remote", "remote-first", "hybrid remote", "work from anywhere",
@@ -69,7 +79,7 @@ const LOCATIONS = {
     "kenya", "nairobi", "egypt", "cairo", "mexico", "guadalajara",
     "argentina", "buenos aires", "brazil", "sao paulo",
     "south africa", "cape town", "china", "beijing", "shanghai",
-    "singapore", "malaysia", "kuala lumpur", "thailand", "bangkok",
+    "malaysia", "kuala lumpur", "thailand", "bangkok",
     "costa rica", "peru", "lima", "chile", "santiago",
     "ghana", "ethiopia", "uganda", "tanzania", "morocco"
   ]
@@ -114,8 +124,9 @@ const KEYWORDS = {
     "tech lead", "team lead", "engineering lead", "architect",
     "head of", " head,", "director", "vp ", "vp,", "vice president",
     "manager", "cto", "ceo", "distinguished", "fellow",
-    "engineer iii", "engineer ii", "developer iii", "developer ii",
-    "software engineer 3", "software engineer iii", "software engineer ii",
+    // "II" / "2" is mid-level and allowed; III and up are senior.
+    "engineer iii", "developer iii", "engineer iv", "developer iv",
+    "software engineer 3", "software engineer iii",
     "kıdemli", "üst düzey",
   ],
   // Titles we can't use. `engineer` alone is ambiguous; we keep the software
@@ -232,138 +243,187 @@ function maxYearsRequired(text) {
   return max;
 }
 
+// Top Turkish companies whose ATS boards we poll directly (scrapers/boards.js).
+const TR_COMPANIES = new Set([
+  "trendyol", "insiderone", "peakgames", "dreamgames", "iyzico", "picus",
+  "commencis", "dataroid", "ciceksepeti", "getmidas", "codeway", "agave",
+  "biggergames", "goodjobgames", "loopgames", "obilet", "n11",
+]);
+
+// Core stack from the user's preferences — drives S-tier eligibility and fit.
+const CORE_STACK = [
+  "c#", ".net", "asp.net", "blazor", "sql", "typescript", "javascript",
+  "python", "java", "aws", "node.js", "react",
+];
+
+const CYBER_TITLE = [
+  "security engineer", "cyber security", "cybersecurity", "security analyst",
+  "soc analyst", "penetration tester", "pentester", "appsec",
+  "application security", "devsecops", "information security",
+  "security operations", "incident response", "vulnerability",
+  "threat intelligence", "siber güvenlik", "bilgi güvenliği",
+];
+
+const MID_TITLE = [
+  "mid", "mid-level", "mid level", "intermediate", "engineer ii",
+  "developer ii", "software engineer 2", "engineer 2", "developer 2",
+];
+
+// Remote only if the listing itself says so — not because "remote" appears
+// somewhere in a long description.
+const REMOTE_PHRASES = [
+  "fully remote", "100% remote", "remote-first", "remote first",
+  "work from anywhere", "remote position", "remote role", "this role is remote",
+  "tamamen uzaktan", "uzaktan çalışma",
+];
+const REMOTE_ONLY_SOURCES = new Set(["remoteok", "remotive", "jobicy", "weworkremotely"]);
+const REMOTE_OPEN = ["anywhere", "worldwide", "global", "emea", "europe", "international"];
+
+const US_STATES = "AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC";
+const US_LOCATION_RE = new RegExp(`(,\\s*(${US_STATES})\\b)|\\b(united states|usa|u\\.s\\.a?\\.?|us)\\b|\\b(new york|san francisco|seattle|boston|austin|chicago|los angeles|denver|atlanta|miami|bay area)\\b`, "i");
+
+// Things you can't satisfy — hide the job outright.
+const US_ONLY_TEXT = [
+  /\b(u\.?s\.?|united states|american) citizen(s|ship)?\b/i,
+  /\bsecurity clearance\b|\b(ts\/sci|top secret|secret clearance|public trust clearance)\b/i,
+  /\bgreen card\b/i,
+  /\b(authori[sz]ed|eligible|legally able) to work in the (u\.?s\.?a?|united states)\b/i,
+  /\b(reside|live|be located|be based|located) (in|within) the (u\.?s\.?a?|united states|contiguous)\b/i,
+  /\b(us|u\.s\.|usa|united states)[- ](only|based candidates|residents? only)\b/i,
+  /\b(north america|americas|us time ?zones?)[- ]only\b/i,
+  /\bitar\b|\bus persons?\b/i,
+];
+const NO_SPONSOR_RE = /\b(no|not|unable to|cannot|can't|will not|won't|do not|does not) (provide |offer )?(visa |work permit )?sponsor/i;
+
 function scoreJob(job) {
-  const text = `${job.title} ${job.company} ${job.location} ${job.description} ${job.tags || ""}`.toLowerCase();
   const title = (job.title || "").toLowerCase();
+  const location = (job.location || "").split("\n")[0].trim();
+  const locLower = location.toLowerCase();
+  const desc = (job.description || "").toLowerCase();
+  const tags = (job.tags || "").toLowerCase();
+  const text = `${title} ${job.company || ""} ${locLower} ${desc} ${tags}`.toLowerCase();
+  const hide = (why) => ({ score: 0, rating: "-", breakdown: `✕ ${why}`, is_remote: 0, hidden: true, filter_reason: why });
 
-  // ─── Step 1: Hard exclusions ───────────────────────────────────────────────
-  if (matchesAnyWord(title, KEYWORDS.non_software)) {
-    return { score: 0, rating: "-", breakdown: "- Not a software role", is_remote: 0, hidden: true };
-  }
+  // ─── Step 1: Is this a role we want at all? ────────────────────────────────
+  const isCyber = matchesAnyWord(title, CYBER_TITLE);
+  if (!isCyber && matchesAnyWord(title, KEYWORDS.non_software)) return hide("Not a software role");
+  if (!isCyber && !matchesAnyWord(title, KEYWORDS.software_title)) return hide("Title doesn't match software roles");
+  if (matchesAnyWord(title, KEYWORDS.senior_title)) return hide(`Senior/lead title ("${job.title}")`);
 
-  if (!matchesAnyWord(title, KEYWORDS.software_title)) {
-    return { score: 0, rating: "-", breakdown: "- Title doesn't match software roles", is_remote: 0, hidden: true };
-  }
+  // ─── Step 2: Where is it, and can the user apply? ──────────────────────────
+  // Location comes from the location field + title; the description is only a
+  // fallback when the listing has no location.
+  const locText = location ? `${title} ${locLower} ${tags}` : text;
+  const company = (job.company || "").toLowerCase().replace(/\s+/g, "");
+  const isTRCompany = TR_COMPANIES.has(company);
 
-  // Senior/Staff/Lead/Manager titles — user is a junior; these don't fit.
-  // Hide them outright so they stop polluting the top of the list.
-  const isSenior = matchesAnyWord(title, KEYWORDS.senior_title);
-  if (isSenior) {
-    return {
-      score: 0,
-      rating: "-",
-      breakdown: `- Senior/staff/lead title ("${job.title}") — user targets junior roles`,
-      is_remote: 0,
-      hidden: true,
-    };
-  }
+  const isRemote =
+    REMOTE_ONLY_SOURCES.has(job.source) ||
+    (job.source === "linkedin" && job.is_remote === 1) ||
+    includesAny(`${title} ${locLower} ${tags}`, LOCATIONS.remote) ||
+    locLower === "telecommute" ||
+    includesAny(desc, REMOTE_PHRASES);
+  const isIreland = includesAny(locText, LOCATIONS.ireland);
+  const isTurkey = includesAny(locText, LOCATIONS.turkey);
+  const isAbroadOK = ["uk", "europe", "canada", "singapore", "gulf", "anz", "asia"]
+    .some((k) => includesAny(locText, LOCATIONS[k]));
+  const isUSLoc = US_LOCATION_RE.test(location) && !isIreland && !isTurkey && !isAbroadOK
+    && !includesAny(locLower, REMOTE_OPEN);
+  const isExcluded = includesAny(locText, LOCATIONS.excluded) && !isIreland && !isTurkey && !isAbroadOK;
+  const isHome = isIreland || isTurkey;
 
-  // Location detection uses substring matching because the lists contain
-  // fragments like "türkiye" where \b is unreliable with non-ASCII.
-  const isRemote = includesAny(text, LOCATIONS.remote);
-  const isIreland = includesAny(text, LOCATIONS.ireland);
-  const isTurkey = includesAny(text, LOCATIONS.turkey);
-  const isUK = includesAny(text, LOCATIONS.uk);
-  const isEurope = includesAny(text, LOCATIONS.europe);
-  const isUSA = includesAny(text, LOCATIONS.usa);
-  const isExcludedCountry = includesAny(text, LOCATIONS.excluded);
+  for (const re of US_ONLY_TEXT) if (re.test(text)) return hide("US citizenship/clearance/work authorization required");
+  if (isUSLoc) return hide(`US-based (${location})`);
+  if (isExcluded) return hide(`Excluded location (${location})`);
+  if (!isHome && !isRemote && !isAbroadOK && !(isTRCompany && !location)) return hide(`On-site outside target countries (${location || "unknown"})`);
+  if (!isHome && !isRemote && NO_SPONSOR_RE.test(text)) return hide("On-site abroad, no visa sponsorship");
 
-  if (isExcludedCountry && !isRemote) {
-    return { score: 0, rating: "-", breakdown: "- Excluded location (not remote)", is_remote: 0, hidden: true };
-  }
-  if (!isRemote && !(isIreland || isTurkey)) {
-    return { score: 0, rating: "-", breakdown: "- In-office outside Ireland/Turkey", is_remote: 0, hidden: true };
-  }
-
-  // Demote (not hide) listings that require a lot of years. Companies will
-  // sometimes phrase senior roles without "senior" in the title.
-  const yearsReq = maxYearsRequired(text);
-  const tooSeniorByYears = yearsReq >= 5;
-
-  // ─── Step 2: Score ─────────────────────────────────────────────────────────
-  const plusses = [];
-  const minuses = [];
-  const breakdown = [];
-
-  // Location tier
-  if (isRemote && (isIreland || isTurkey)) {
-    plusses.push("+++", "+++");
-    if (isIreland) breakdown.push("++++++ Remote + Ireland (S tier)");
-    if (isTurkey) breakdown.push("++++++ Remote + Turkey (S tier)");
-  } else if (isIreland) {
-    plusses.push("+++");
-    breakdown.push("+++  Ireland based (S tier - can negotiate remote)");
-  } else if (isTurkey) {
-    plusses.push("+++");
-    breakdown.push("+++  Turkey/Istanbul (S tier)");
+  // ─── Step 3: Tier ──────────────────────────────────────────────────────────
+  // LinkedIn cards arrive with a placeholder "Title at Company - Location"
+  // until enrichment fetches the real text — then the stack is unknown, not absent.
+  const hasDesc = desc.length >= 300 && !desc.startsWith(`${title} at `);
+  const stack = filterWords(`${title} ${desc} ${tags}`, CORE_STACK);
+  const isAI = matchesAnyWord(title, KEYWORDS.ai_ml_title);
+  const lines = [];
+  let tier;
+  if (isTRCompany && (isTurkey || isRemote || !location)) {
+    tier = "S"; lines.push(`Tier S · top Turkish company (${job.company})`);
+  } else if (isHome && (stack.length || isAI || !hasDesc)) {
+    tier = "S"; lines.push(`Tier S · ${isIreland ? "Ireland" : "Turkey"}${isRemote ? " (remote)" : ""}${hasDesc || stack.length ? " + your stack" : " · stack unknown (no description yet)"}`);
+  } else if (isHome) {
+    tier = "A"; lines.push(`Tier A · ${isIreland ? "Ireland" : "Turkey"}, no stack match`);
+  } else if (isCyber) {
+    tier = "A"; lines.push(`Tier A · cyber security${isRemote ? " (remote)" : ""}`);
   } else if (isRemote) {
-    plusses.push("++");
-    breakdown.push("++   Remote position (A tier)");
-    if (isUSA) { plusses.push("+"); breakdown.push("+    USA based"); }
-    if (isUK) { plusses.push("+"); breakdown.push("+    UK based"); }
-    if (isEurope) { plusses.push("+"); breakdown.push("+    Europe based"); }
+    tier = "A"; lines.push("Tier A · remote");
+  } else {
+    tier = "B"; lines.push(`Tier B · on-site abroad (${location})`);
   }
 
-  // Junior bonus — require TITLE match OR clear junior signals in the body.
-  // "intern" as a substring of "international" no longer counts.
-  const juniorInTitle = matchesAnyWord(title, KEYWORDS.junior_title);
-  const juniorInBody = matchesAnyWord(text, KEYWORDS.junior_body);
-  if (juniorInTitle) {
-    plusses.push("+++");
-    breakdown.push("+++  Junior title");
-  } else if (juniorInBody && yearsReq <= 2) {
-    plusses.push("++");
-    breakdown.push("++   Body signals junior-friendly");
+  const yearsReq = maxYearsRequired(text);
+  if (yearsReq >= 5) {
+    const demoted = { S: "A", A: "B", B: "B" }[tier];
+    lines.push(`− Asks for ${yearsReq}+ years → ${tier === demoted ? "bottom of tier" : `demoted ${tier}→${demoted}`}`);
+    tier = demoted;
   }
 
-  // AI/ML bonus — title-only. Avoids false positives from any company that
-  // happens to mention AI in their product description.
-  if (matchesAnyWord(title, KEYWORDS.ai_ml_title)) {
-    plusses.push("+++");
-    breakdown.push("+++  AI/ML role");
-  }
+  // ─── Step 4: Fit inside the tier (0..1) ────────────────────────────────────
+  let fit = 0;
+  // Unknown stack counts as one match (neutral), not zero.
+  const stackPts = Math.min(Math.max(stack.length, hasDesc ? 0 : 1) / 3, 1) * 0.4;
+  fit += stackPts;
+  if (stack.length) lines.push(`+${(stackPts * 2).toFixed(1)} stack: ${stack.slice(0, 6).join(", ")}`);
 
-  // Skills — word-bounded now. Cap the count so the bonus stays sensible.
-  const matchedSkills = filterWords(text, KEYWORDS.skills);
-  if (matchedSkills.length >= 4) {
-    plusses.push("++");
-    breakdown.push(`++   Strong skills match (${matchedSkills.slice(0, 5).join(", ")})`);
-  } else if (matchedSkills.length >= 1) {
-    plusses.push("+");
-    breakdown.push(`+    Skills match (${matchedSkills.slice(0, 4).join(", ")})`);
-  }
+  let levelPts = 0.1, levelWhy = "level not stated";
+  if (matchesAnyWord(title, KEYWORDS.junior_title)) { levelPts = 0.3; levelWhy = "junior / new grad title"; }
+  else if (matchesAnyWord(title, MID_TITLE)) { levelPts = 0.25; levelWhy = "mid-level title"; }
+  else if (matchesAnyWord(text, KEYWORDS.junior_body) && yearsReq <= 2) { levelPts = 0.2; levelWhy = "junior-friendly description"; }
+  fit += levelPts;
+  lines.push(`+${(levelPts * 2).toFixed(1)} ${levelWhy}`);
 
-  if (job.is_easy_apply) {
-    plusses.push("+");
-    breakdown.push("+    Easy Apply");
-  }
+  if (isAI) { fit += 0.2; lines.push("+0.4 AI/ML role"); }
+  if (isRemote && isHome) { fit += 0.1; lines.push("+0.2 remote in Ireland/Turkey"); }
+  else if (job.is_easy_apply) { fit += 0.05; lines.push("+0.1 Easy Apply"); }
+  if (yearsReq >= 3 && yearsReq < 5) { fit -= 0.1; lines.push(`−0.2 asks for ${yearsReq} years`); }
+  if (yearsReq >= 5) fit = Math.min(fit, 0.2);
 
-  // Penalties
-  if (tooSeniorByYears) {
-    minuses.push(-15);
-    breakdown.push(`-    Requires ${yearsReq}+ years experience`);
-  }
+  fit = Math.max(0, Math.min(1, fit));
+  const low = { S: 80, A: 60, B: 40 }[tier];
+  const score = Math.min(tier === "S" ? 100 : low + 19, low + Math.round(fit * 20));
 
-  // Calculate: base 30, +5 per plus sign, cap 100, apply minuses last.
-  let totalPlus = 0;
-  for (const p of plusses) totalPlus += p.length;
-  let score = Math.min(100, 30 + totalPlus * 5);
-  for (const m of minuses) score += m;
-  score = Math.max(0, Math.min(100, score));
-
-  const rating = plusses.join("") || "+";
-
-  return {
-    score,
-    rating,
-    breakdown: breakdown.join("\n") || "+    Standard match",
-    is_remote: isRemote ? 1 : 0,
-    hidden: false,
-  };
+  return { score, rating: tier, breakdown: lines.join("\n"), is_remote: isRemote ? 1 : 0, hidden: false, filter_reason: null };
 }
 
 function isPriorityJob(job) {
-  return job.score >= 70;
+  return job.score >= 80;
 }
 
-module.exports = { scoreJob, isPriorityJob, LOCATIONS, KEYWORDS };
+module.exports = { scoreJob, isPriorityJob, LOCATIONS, KEYWORDS, TR_COMPANIES };
+
+// Self-check: node scorer.js
+if (require.main === module) {
+  const assert = require("assert");
+  const j = (o) => scoreJob({ source: "linkedin", title: "Software Engineer", company: "Acme", location: "", description: "", tags: "", ...o });
+  assert.strictEqual(j({ title: "Junior .NET Developer", location: "Dublin, Ireland", description: "C#, SQL, Azure" }).rating, "S");
+  assert.strictEqual(j({ title: "Backend Developer", location: "Istanbul, Türkiye", company: "trendyol" }).rating, "S");
+  const longNoStack = "We build embedded firmware for industrial devices. ".repeat(8);
+  assert.strictEqual(j({ title: "Junior Developer", location: "Istanbul", description: longNoStack }).rating, "A"); // no stack
+  assert.strictEqual(j({ title: "Junior Developer", location: "Istanbul" }).rating, "S"); // stack unknown
+  assert.strictEqual(j({ title: "Security Analyst", location: "Remote" }).rating, "A");
+  assert.strictEqual(j({ title: "Software Developer", location: "Remote - Worldwide" }).rating, "A");
+  assert.strictEqual(j({ title: "Software Developer", location: "Toronto, ON, Canada" }).rating, "B");
+  assert.strictEqual(j({ title: "Software Developer", location: "Dubai, United Arab Emirates" }).rating, "B");
+  assert.strictEqual(j({ title: "Software Engineer II", location: "Singapore" }).rating, "B");
+  assert.ok(j({ title: "Software Engineer", location: "Austin, TX", is_remote: 1 }).hidden);
+  assert.ok(j({ title: "Software Engineer", location: "Remote", description: "Must be a U.S. citizen" }).hidden);
+  assert.ok(j({ title: "Software Engineer", location: "Remote", description: "active security clearance" }).hidden);
+  assert.ok(j({ title: "Software Engineer", location: "Paris", description: "we offer remote flexibility" }).rating === "B");
+  assert.ok(j({ title: "Software Engineer", location: "Bangalore, India", is_remote: 1 }).hidden);
+  assert.ok(j({ title: "Senior Software Engineer", location: "Dublin" }).hidden);
+  assert.ok(j({ title: "AI Engineer | REMOTE (North America only)", location: "Remote" }).hidden);
+  assert.ok(j({ title: "Software Engineer", location: "London", description: "We do not offer visa sponsorship" }).hidden);
+  const s = j({ title: "Junior AI Engineer", location: "Dublin, Ireland", description: "python aws typescript" });
+  assert.ok(s.score >= 95, s.score);
+  assert.strictEqual(j({ title: "Software Engineer", location: "Dublin", description: "python, 6+ years experience" }).rating, "A");
+  console.log("scorer self-check ok");
+}
