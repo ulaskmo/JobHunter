@@ -1,5 +1,4 @@
-const { insertJob, logScrape } = require("../database");
-const { scoreJob } = require("../scorer");
+const { ingestJob, logScrape } = require("../database");
 const { fetchJSON, stripHTML, sleep } = require("./_http");
 
 const API = "https://www.arbeitnow.com/api/job-board-api";
@@ -41,17 +40,7 @@ async function scrapeArbeitnow() {
           score_breakdown: "",
         };
 
-        const scoring = scoreJob(jobData);
-        if (scoring.hidden) continue;
-        jobData.score = scoring.score;
-        jobData.rating = scoring.rating;
-        jobData.score_breakdown = scoring.breakdown;
-        jobData.is_remote = scoring.is_remote || jobData.is_remote;
-
-        try {
-          const r = insertJob.run(jobData);
-          if (r.changes > 0) { newJobs++; newInPage++; }
-        } catch (e) { /* dup */ }
+        if (ingestJob(jobData)) { newJobs++; newInPage++; }
       }
 
       // Stop when the page brought nothing new — we've hit the old part of the feed.

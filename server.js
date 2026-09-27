@@ -71,7 +71,10 @@ function buildJobFilters({ status, source, search, priority, location, time }) {
   const where = [];
   const params = [];
 
-  if (status && status !== "all") {
+  if (status === "filtered") {
+    // Jobs the scorer's rules removed — for checking a rule isn't too strict.
+    where.push("status = 'new' AND filter_reason IS NOT NULL AND is_expired = 0");
+  } else if (status && status !== "all") {
     where.push("status = ?");
     params.push(status);
   } else {

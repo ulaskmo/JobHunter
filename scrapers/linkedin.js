@@ -1,5 +1,5 @@
 const { chromium } = require("playwright");
-const { insertJob, updateJobScore, logScrape, db } = require("../database");
+const { ingestJob, updateJobScore, logScrape, db } = require("../database");
 const { scoreJob } = require("../scorer");
 const path = require("path");
 const fs = require("fs");
@@ -223,19 +223,7 @@ async function scrapeLinkedIn() {
             score_breakdown: "",
           };
 
-          const scoring = scoreJob(jobData);
-          if (scoring.hidden) continue;
-          jobData.score = scoring.score;
-          jobData.rating = scoring.rating;
-          jobData.score_breakdown = scoring.breakdown;
-          if (scoring.is_remote) jobData.is_remote = 1;
-
-          try {
-            const result = insertJob.run(jobData);
-            if (result.changes > 0) totalNew++;
-          } catch (e) {
-            // Duplicate
-          }
+          if (ingestJob(jobData)) totalNew++;
         }
 
         // Be polite between searches

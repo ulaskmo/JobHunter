@@ -1,5 +1,4 @@
-const { insertJob, logScrape } = require("../database");
-const { scoreJob } = require("../scorer");
+const { ingestJob, logScrape } = require("../database");
 const { fetchJSON, stripHTML, sleep } = require("./_http");
 
 // Each month there's a "Ask HN: Who is hiring?" thread. We find the latest few
@@ -95,17 +94,7 @@ async function scrapeHNHiring() {
             score_breakdown: "",
           };
 
-          const scoring = scoreJob(jobData);
-          if (scoring.hidden) continue;
-          jobData.score = scoring.score;
-          jobData.rating = scoring.rating;
-          jobData.score_breakdown = scoring.breakdown;
-          if (scoring.is_remote) jobData.is_remote = 1;
-
-          try {
-            const r = insertJob.run(jobData);
-            if (r.changes > 0) newJobs++;
-          } catch (e) { /* dup */ }
+          if (ingestJob(jobData)) newJobs++;
         }
         await sleep(200);
       }

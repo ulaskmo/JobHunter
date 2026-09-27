@@ -1,5 +1,4 @@
-const { insertJob, logScrape } = require("../database");
-const { scoreJob } = require("../scorer");
+const { ingestJob, logScrape } = require("../database");
 const { fetchText, stripHTML, decodeEntities, sleep } = require("./_http");
 
 // WeWorkRemotely publishes per-category RSS feeds. These cover software
@@ -83,16 +82,7 @@ async function scrapeWWR() {
           score_breakdown: "",
         };
 
-        const scoring = scoreJob(jobData);
-        if (scoring.hidden) continue;
-        jobData.score = scoring.score;
-        jobData.rating = scoring.rating;
-        jobData.score_breakdown = scoring.breakdown;
-
-        try {
-          const r = insertJob.run(jobData);
-          if (r.changes > 0) newJobs++;
-        } catch (e) { /* dup */ }
+        if (ingestJob(jobData)) newJobs++;
       }
       await sleep(500);
     }

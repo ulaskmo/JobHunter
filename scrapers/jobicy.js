@@ -1,5 +1,4 @@
-const { insertJob, logScrape } = require("../database");
-const { scoreJob } = require("../scorer");
+const { ingestJob, logScrape } = require("../database");
 const { fetchJSON, stripHTML, sleep } = require("./_http");
 
 const API = "https://jobicy.com/api/v2/remote-jobs";
@@ -63,16 +62,7 @@ async function scrapeJobicy() {
           score_breakdown: "",
         };
 
-        const scoring = scoreJob(jobData);
-        if (scoring.hidden) continue;
-        jobData.score = scoring.score;
-        jobData.rating = scoring.rating;
-        jobData.score_breakdown = scoring.breakdown;
-
-        try {
-          const r = insertJob.run(jobData);
-          if (r.changes > 0) newJobs++;
-        } catch (e) { /* dup */ }
+        if (ingestJob(jobData)) newJobs++;
       }
       await sleep(300);
     }

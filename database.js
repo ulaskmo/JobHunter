@@ -90,8 +90,8 @@ const POSTED_AT = "COALESCE(NULLIF(posted_date, ''), scraped_at)";
 
 // ─── Prepared Statements ──────────────────────────────────────────────────────
 const insertJob = db.prepare(`
-  INSERT OR IGNORE INTO jobs (external_id, source, title, company, location, salary, description, url, posted_date, tags, job_type, experience_level, is_remote, is_easy_apply, score, rating, score_breakdown)
-  VALUES (@external_id, @source, @title, @company, @location, @salary, @description, @url, @posted_date, @tags, @job_type, @experience_level, @is_remote, @is_easy_apply, @score, @rating, @score_breakdown)
+  INSERT OR IGNORE INTO jobs (external_id, source, title, company, location, salary, description, url, posted_date, tags, job_type, experience_level, is_remote, is_easy_apply, score, rating, score_breakdown, filter_reason)
+  VALUES (@external_id, @source, @title, @company, @location, @salary, @description, @url, @posted_date, @tags, @job_type, @experience_level, @is_remote, @is_easy_apply, @score, @rating, @score_breakdown, @filter_reason)
 `);
 
 const updateJobScore = db.prepare(`
@@ -133,6 +133,7 @@ const getStats = db.prepare(`
     SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected_count,
     SUM(CASE WHEN status = 'saved' THEN 1 ELSE 0 END) as saved_count,
     SUM(CASE WHEN status = 'hidden' THEN 1 ELSE 0 END) as hidden_count,
+    SUM(CASE WHEN filter_reason IS NOT NULL AND status = 'new' AND is_expired = 0 THEN 1 ELSE 0 END) as filtered_count,
     SUM(CASE WHEN score >= 80 AND status = 'new' AND filter_reason IS NULL AND is_expired = 0 THEN 1 ELSE 0 END) as priority_count
   FROM jobs
 `);
@@ -148,16 +149,19 @@ const searchJobs = db.prepare(`
   ORDER BY score DESC, scraped_at DESC
 `);
 
-// Score a scraped job and insert it unless the scorer hides it.
-// Returns true when a new row was inserted.
+// Score a scraped job and insert it. Rule-filtered jobs are stored with their
+// filter_reason (shown in the Filtered tab) so a bad rule can be spotted —
+// except plain non-software titles, which are pure noise.
+// Returns true when a new, visible row was inserted.
 function ingestJob(job) {
   const s = require("./scorer").scoreJob(job);
-  if (s.hidden) return false;
+  if (s.hidden && /^(Not a software role|Title doesn't match)/.test(s.filter_reason)) return false;
   job.score = s.score;
   job.rating = s.rating;
   job.score_breakdown = s.breakdown;
+  job.filter_reason = s.filter_reason;
   if (s.is_remote) job.is_remote = 1;
-  try { return insertJob.run(job).changes > 0; } catch (e) { return false; }
+  try { return insertJob.run(job).changes > 0 && !s.hidden; } catch (e) { return false; }
 }
 
 module.exports = {

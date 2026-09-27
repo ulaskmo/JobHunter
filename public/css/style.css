@@ -269,6 +269,9 @@ button, .btn-link {
 .rating-S { background: var(--s-bg); color: var(--s); }
 .rating-A { background: var(--a-bg); color: var(--a); }
 .rating-B { background: var(--b-bg); color: var(--b); }
+.rating-X { background: var(--red-bg); color: var(--red); }
+.job-card.tier-X { border-left-color: var(--red); opacity: 0.85; }
+.filter-reason { font-family: var(--mono); font-size: 11px; color: var(--red); margin-top: 3px; }
 
 .job-info { flex: 1; min-width: 0; }
 

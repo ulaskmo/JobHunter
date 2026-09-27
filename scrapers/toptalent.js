@@ -1,6 +1,5 @@
 const { chromium } = require("playwright");
-const { insertJob, logScrape } = require("../database");
-const { scoreJob } = require("../scorer");
+const { ingestJob, logScrape } = require("../database");
 const { sleep, stripHTML } = require("./_http");
 const path = require("path");
 const fs = require("fs");
@@ -164,17 +163,7 @@ async function scrapeToptalent() {
                 score_breakdown: "",
               };
 
-              const scoring = scoreJob(jobData);
-              if (scoring.hidden) continue;
-              jobData.score = scoring.score;
-              jobData.rating = scoring.rating;
-              jobData.score_breakdown = scoring.breakdown;
-              if (scoring.is_remote) jobData.is_remote = 1;
-
-              try {
-                const result = insertJob.run(jobData);
-                if (result.changes > 0) { totalNew++; newInThisBatch++; }
-              } catch (e) { /* duplicate */ }
+              if (ingestJob(jobData)) { totalNew++; newInThisBatch++; }
             }
 
             // If a whole page returned but no new rows landed, we're looping

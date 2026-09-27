@@ -46,6 +46,13 @@ const LOCATIONS = {
     "estonia", "tallinn", "latvia", "riga", "lithuania", "vilnius",
     "romania", "bucharest", "hungary", "budapest", "greece", "athens",
     "cyprus", "limassol", "malta", "iceland",
+    // Local-language spellings (arbeitnow, SmartRecruiters, etc.)
+    "schweiz", "suisse", "svizzera", "zürich", "genève", "lausanne", "basel", "bern",
+    "deutschland", "münchen", "köln", "düsseldorf", "stuttgart", "leipzig",
+    "österreich", "wien", "graz", "nederland", "den haag", "utrecht", "eindhoven",
+    "españa", "valencia", "italia", "milano", "roma", "torino", "polska", "warszawa", "kraków", "wrocław",
+    "sverige", "göteborg", "danmark", "københavn", "norge", "suomi", "belgique", "belgië",
+    "česko", "praha", "magyarország", "reykjavík", "nürnberg", "nuremberg", "hannover", "dresden",
     "europe",
   ],
   usa: [
@@ -255,6 +262,12 @@ const CORE_STACK = [
   "c#", ".net", "asp.net", "blazor", "sql", "typescript", "javascript",
   "python", "java", "aws", "node.js", "react",
 ];
+// "God tier": C#, .NET family and SQL score double and add a bonus.
+const GOD_STACK = ["c#", ".net", "asp.net", "blazor", "sql"];
+
+// Needs the right to work in Canada — kept, but pushed to B so it doesn't
+// eat time ahead of jobs the user can actually take.
+const CANADA_RIGHT_RE = /\b(authori[sz]ed|eligible|legally (able|entitled)|right) to work in canada\b|\bcanadian (citizen|citizenship|permanent resident)|\b(reside|live|be located|be based|located) (in|within) canada\b|\bcanada[- ](only|based candidates|residents? only)\b/i;
 
 const CYBER_TITLE = [
   "security engineer", "cyber security", "cybersecurity", "security analyst",
@@ -331,6 +344,9 @@ function scoreJob(job) {
     && !includesAny(locLower, REMOTE_OPEN);
   const isExcluded = includesAny(locText, LOCATIONS.excluded) && !isIreland && !isTurkey && !isAbroadOK;
   const isHome = isIreland || isTurkey;
+  const isCanada = includesAny(locText, LOCATIONS.canada);
+  const needsCanadaRight = CANADA_RIGHT_RE.test(text) ||
+    (isCanada && isRemote && !isHome && !includesAny(locLower, [...REMOTE_OPEN, ...LOCATIONS.uk, ...LOCATIONS.europe]));
 
   for (const re of US_ONLY_TEXT) if (re.test(text)) return hide("US citizenship/clearance/work authorization required");
   if (isUSLoc) return hide(`US-based (${location})`);
@@ -346,14 +362,17 @@ function scoreJob(job) {
   const isAI = matchesAnyWord(title, KEYWORDS.ai_ml_title);
   const lines = [];
   let tier;
-  if (isTRCompany && (isTurkey || isRemote || !location)) {
+  if (isCyber) {
+    // Cyber security is always A, even in Ireland/Turkey.
+    tier = "A"; lines.push(`Tier A · cyber security${isRemote ? " (remote)" : ""}`);
+  } else if (needsCanadaRight) {
+    tier = "B"; lines.push("Tier B · needs the right to work in Canada");
+  } else if (isTRCompany && (isTurkey || isRemote || !location)) {
     tier = "S"; lines.push(`Tier S · top Turkish company (${job.company})`);
   } else if (isHome && (stack.length || isAI || !hasDesc)) {
     tier = "S"; lines.push(`Tier S · ${isIreland ? "Ireland" : "Turkey"}${isRemote ? " (remote)" : ""}${hasDesc || stack.length ? " + your stack" : " · stack unknown (no description yet)"}`);
   } else if (isHome) {
     tier = "A"; lines.push(`Tier A · ${isIreland ? "Ireland" : "Turkey"}, no stack match`);
-  } else if (isCyber) {
-    tier = "A"; lines.push(`Tier A · cyber security${isRemote ? " (remote)" : ""}`);
   } else if (isRemote) {
     tier = "A"; lines.push("Tier A · remote");
   } else {
@@ -369,10 +388,14 @@ function scoreJob(job) {
 
   // ─── Step 4: Fit inside the tier (0..1) ────────────────────────────────────
   let fit = 0;
-  // Unknown stack counts as one match (neutral), not zero.
-  const stackPts = Math.min(Math.max(stack.length, hasDesc ? 0 : 1) / 3, 1) * 0.4;
+  // Each skill counts 1, god-tier skills count 2; unknown stack counts as one
+  // ordinary match (neutral), not zero.
+  const god = stack.filter((k) => GOD_STACK.includes(k));
+  const points = Math.max(stack.length + god.length, hasDesc ? 0 : 1);
+  const stackPts = Math.min(points / 4, 1) * 0.35;
   fit += stackPts;
   if (stack.length) lines.push(`+${(stackPts * 2).toFixed(1)} stack: ${stack.slice(0, 6).join(", ")}`);
+  if (god.length) { fit += 0.2; lines.push(`+0.4 god-tier stack: ${god.join(", ")}`); }
 
   let levelPts = 0.1, levelWhy = "level not stated";
   if (matchesAnyWord(title, KEYWORDS.junior_title)) { levelPts = 0.3; levelWhy = "junior / new grad title"; }
@@ -410,10 +433,18 @@ if (require.main === module) {
   assert.strictEqual(j({ title: "Junior Developer", location: "Istanbul", description: longNoStack }).rating, "A"); // no stack
   assert.strictEqual(j({ title: "Junior Developer", location: "Istanbul" }).rating, "S"); // stack unknown
   assert.strictEqual(j({ title: "Security Analyst", location: "Remote" }).rating, "A");
+  assert.strictEqual(j({ title: "Cyber Security Engineer", location: "Dublin, Ireland", description: "python sql" }).rating, "A");
+  assert.strictEqual(j({ title: "Software Developer", location: "Remote - Worldwide", description: "Must be legally eligible to work in Canada" }).rating, "B");
+  assert.strictEqual(j({ title: "Software Developer", location: "Toronto, ON, Canada", is_remote: 1 }).rating, "B");
+  const godJob = j({ title: "Software Developer", location: "Dublin, Ireland", description: "C#, .NET and SQL Server. " + "x ".repeat(200) });
+  const jsJob = j({ title: "Software Developer", location: "Dublin, Ireland", description: "JavaScript, React and Python. " + "x ".repeat(200) });
+  assert.ok(godJob.score > jsJob.score, `${godJob.score} vs ${jsJob.score}`);
   assert.strictEqual(j({ title: "Software Developer", location: "Remote - Worldwide" }).rating, "A");
   assert.strictEqual(j({ title: "Software Developer", location: "Toronto, ON, Canada" }).rating, "B");
   assert.strictEqual(j({ title: "Software Developer", location: "Dubai, United Arab Emirates" }).rating, "B");
   assert.strictEqual(j({ title: "Software Engineer II", location: "Singapore" }).rating, "B");
+  assert.strictEqual(j({ title: "Software Developer", location: "Rüthi, Sankt Gallen, Schweiz" }).rating, "B");
+  assert.strictEqual(j({ title: "Software Developer", location: "Zürich" }).rating, "B");
   assert.ok(j({ title: "Software Engineer", location: "Austin, TX", is_remote: 1 }).hidden);
   assert.ok(j({ title: "Software Engineer", location: "Remote", description: "Must be a U.S. citizen" }).hidden);
   assert.ok(j({ title: "Software Engineer", location: "Remote", description: "active security clearance" }).hidden);

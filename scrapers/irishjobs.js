@@ -1,5 +1,4 @@
-const { insertJob, logScrape } = require("../database");
-const { scoreJob } = require("../scorer");
+const { ingestJob, logScrape } = require("../database");
 const { fetchText, stripHTML, sleep } = require("./_http");
 
 // IrishJobs.ie renders job results server-side. Each card is an <article>
@@ -126,17 +125,7 @@ async function scrapeIrishJobs() {
             score_breakdown: "",
           };
 
-          const scoring = scoreJob(jobData);
-          if (scoring.hidden) continue;
-          jobData.score = scoring.score;
-          jobData.rating = scoring.rating;
-          jobData.score_breakdown = scoring.breakdown;
-          if (scoring.is_remote) jobData.is_remote = 1;
-
-          try {
-            const r = insertJob.run(jobData);
-            if (r.changes > 0) { newJobs++; newInPage++; }
-          } catch (e) { /* dup */ }
+          if (ingestJob(jobData)) { newJobs++; newInPage++; }
         }
 
         if (newInPage === 0 && page > 1) break;

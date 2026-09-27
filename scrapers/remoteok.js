@@ -1,6 +1,5 @@
 const https = require("https");
-const { insertJob, logScrape } = require("../database");
-const { scoreJob } = require("../scorer");
+const { ingestJob, logScrape } = require("../database");
 
 function fetchJSON(url) {
   return new Promise((resolve, reject) => {
@@ -56,19 +55,7 @@ async function scrapeRemoteOK() {
       };
 
       // Score the job
-      const scoring = scoreJob(jobData);
-      if (scoring.hidden) continue; // Skip excluded jobs entirely
-      jobData.score = scoring.score;
-      jobData.rating = scoring.rating;
-      jobData.score_breakdown = scoring.breakdown;
-      jobData.is_remote = scoring.is_remote || 1;
-
-      try {
-        const result = insertJob.run(jobData);
-        if (result.changes > 0) newJobs++;
-      } catch (e) {
-        // Duplicate, skip
-      }
+      if (ingestJob(jobData)) newJobs++;
     }
 
     console.log(`[RemoteOK] ${newJobs} new jobs added`);

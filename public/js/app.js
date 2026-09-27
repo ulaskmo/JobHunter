@@ -1,5 +1,5 @@
 let currentPage = 0;
-let currentView = "new"; // new | saved | hidden
+let currentView = "new"; // new | saved | hidden | filtered
 const PAGE_SIZE = 50;
 let searchTimeout = null;
 
@@ -20,6 +20,7 @@ async function loadStats() {
     document.getElementById("countNew").textContent = s.new_count;
     document.getElementById("countSaved").textContent = s.saved_count;
     document.getElementById("countHidden").textContent = s.hidden_count;
+    document.getElementById("countFiltered").textContent = s.filtered_count;
 
     // Source dropdown follows whatever is actually in the DB.
     const sel = document.getElementById("sourceFilter");
@@ -66,6 +67,7 @@ async function loadJobs(page = 0) {
         new: "No jobs found. Try adjusting filters or scan for new jobs.",
         saved: "Nothing saved yet.",
         hidden: "Nothing hidden. Jobs you hide land here so you can bring them back.",
+        filtered: "Nothing filtered out by the rules.",
       }[currentView];
       list.innerHTML = `<div class="loading">${empty}</div>`;
       document.getElementById("pagination").innerHTML = "";
@@ -129,6 +131,8 @@ function actionButtons(job) {
   const info = b("btn-info", "i", `showDetail(${job.id})`, "Details");
   const show = b("btn-show", "Show", `openPosting(${job.id})`, "Open the original posting");
   const applied = b("btn-apply", "Applied", `updateStatus(${job.id},'applied')`, "Mark as applied");
+  if (job.filter_reason && job.status === "new")
+    return info + show + b("btn-save", "Rescue", `updateStatus(${job.id},'saved')`, "Move to Saved — rules won't touch it again");
   if (job.status === "hidden") return info + show + b("btn-save", "Unhide", `updateStatus(${job.id},'new')`);
   if (job.status === "saved")
     return info + show + applied + b("btn-hide", "Unsave", `updateStatus(${job.id},'new')`) + b("btn-hide", "Hide", `updateStatus(${job.id},'hidden')`);
@@ -158,9 +162,13 @@ function renderJobCard(job, isAppliedPanel) {
     `;
   }
 
+  const ruled = job.filter_reason && job.status === "new";
+  const badge = ruled
+    ? `<div class="job-rating rating-X"><span class="num">✕</span><span class="tier">RULE</span></div>`
+    : `<div class="job-rating rating-${tier}"><span class="num">${fmtScore(job.score)}</span><span class="tier">TIER ${tier}</span></div>`;
   return `
-    <div class="job-card tier-${tier}">
-      <div class="job-rating rating-${tier}"><span class="num">${fmtScore(job.score)}</span><span class="tier">TIER ${tier}</span></div>
+    <div class="job-card tier-${ruled ? "X" : tier}">
+      ${badge}
       <div class="job-info">
         <div class="job-title">${escapeHtml(job.title)}</div>
         <div class="job-meta">
@@ -168,6 +176,7 @@ function renderJobCard(job, isAppliedPanel) {
           <span>${escapeHtml(job.location || "Unknown")}</span>
           <span class="when">${postedLabel(job)}</span>
         </div>
+        ${ruled ? `<div class="filter-reason">✕ ${escapeHtml(job.filter_reason)}</div>` : ""}
         <div class="job-tags">${tags}</div>
       </div>
       <div class="job-actions">${actionButtons(job)}</div>
@@ -204,7 +213,7 @@ async function updateStatus(id, status, { undoable = true } = {}) {
     closeModal();
     refreshAll();
     if (previous && previous !== status) {
-      const label = { applied: "Marked applied", saved: "Saved", hidden: "Hidden", new: "Moved back to opportunities", interview: "Marked interview", rejected: "Marked rejected" }[status];
+      const label = { applied: "Marked applied", saved: previous === "new" && currentView === "filtered" ? "Rescued to Saved" : "Saved", hidden: "Hidden", new: "Moved back to opportunities", interview: "Marked interview", rejected: "Marked rejected" }[status];
       showToast(label, () => updateStatus(id, previous, { undoable: false }));
     }
   } catch (e) {
@@ -234,7 +243,9 @@ async function showDetail(id) {
     const job = await fetch(`/api/jobs/${id}`).then((r) => r.json());
     const tier = tierOf(job);
     const btn = (cls, label, status) => `<button class="${cls}" onclick="updateStatus(${job.id},'${status}')">${label}</button>`;
-    const statusButtons = {
+    const statusButtons = job.filter_reason && job.status === "new"
+      ? btn("btn-save", "Rescue to Saved", "saved")
+      : {
       new: btn("btn-apply", "Applied", "applied") + btn("btn-save", "Save", "saved") + btn("btn-hide", "Hide", "hidden"),
       saved: btn("btn-apply", "Applied", "applied") + btn("btn-hide", "Unsave", "new") + btn("btn-hide", "Hide", "hidden"),
       hidden: btn("btn-save", "Unhide", "new"),
