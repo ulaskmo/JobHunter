@@ -1,0 +1,25 @@
+{
+  "name": "job-hunter",
+  "version": "1.0.0",
+  "description": "Local job-hunting dashboard: scrapes RemoteOK / LinkedIn / Kariyer.net, scores against location & skill preferences, pings Telegram on priority hits.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "rescore": "node rescore.js",
+    "verify": "node verify.js",
+    "scrape": "node -e \"require('./scrapers/remoteok').scrapeRemoteOK().then(()=>process.exit())\""
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "better-sqlite3": "^12.8.0",
+    "dotenv": "^17.4.1",
+    "express": "^5.2.1",
+    "node-cron": "^4.2.1",
+    "node-telegram-bot-api": "^0.67.0",
+    "playwright": "^1.59.1"
+  }
+}

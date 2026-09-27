@@ -1,0 +1,11 @@
+node_modules/
+.env
+*.db
+*.db-shm
+*.db-wal
+session/
+screenshots/
+*.log
+*.log.1
+cv.pdf
+.DS_Store
