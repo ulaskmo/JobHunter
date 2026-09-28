@@ -226,7 +226,7 @@ async function runAllScrapers({ onlySource } = {}) {
     ["linkedin_abroad", scrapeLinkedInAbroad, "fast"],
     ["linkedin",       scrapeLinkedIn,   "playwright"],
     ["toptalent",      scrapeToptalent,  "playwright"],
-    ["kariyer",        scrapeKariyer,    "fast"], // no-op (PX wall)
+    ["kariyer",        scrapeKariyer,    "playwright"], // Patchright, PerimeterX
     ["indeed",         scrapeIndeed,     "playwright"],
   ];
 
