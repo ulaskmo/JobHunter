@@ -18,6 +18,7 @@ const { scrapeBoards } = require("./scrapers/boards");
 const { scrapeIrishJobs } = require("./scrapers/irishjobs");
 const { scrapeLinkedInTR } = require("./scrapers/linkedin_tr");
 const { scrapeWorkable } = require("./scrapers/workable");
+const { scrapeIndeed } = require("./scrapers/indeed");
 const { scrapeLinkedInAbroad, enrichLinkedInDescriptions } = require("./scrapers/linkedin_tr");
 const { initTelegram, sendAlert, notifyPriorityJobs, stopTelegram } = require("./telegram");
 
@@ -226,6 +227,7 @@ async function runAllScrapers({ onlySource } = {}) {
     ["linkedin",       scrapeLinkedIn,   "playwright"],
     ["toptalent",      scrapeToptalent,  "playwright"],
     ["kariyer",        scrapeKariyer,    "fast"], // no-op (PX wall)
+    ["indeed",         scrapeIndeed,     "playwright"],
   ];
 
   try {

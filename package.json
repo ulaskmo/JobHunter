@@ -8,6 +8,7 @@
     "dev": "node --watch server.js",
     "rescore": "node rescore.js",
     "verify": "node verify.js",
+    "indeed-login": "node scrapers/indeed.js --login",
     "scrape": "node -e \"require('./scrapers/remoteok').scrapeRemoteOK().then(()=>process.exit())\""
   },
   "keywords": [],
@@ -20,6 +21,7 @@
     "express": "^5.2.1",
     "node-cron": "^4.2.1",
     "node-telegram-bot-api": "^0.67.0",
+    "patchright": "^1.63.0",
     "playwright": "^1.59.1"
   }
 }
