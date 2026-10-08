@@ -72,17 +72,72 @@ function initTelegram() {
       }
       await bot.sendMessage(msg.chat.id, msg_text, { parse_mode: "HTML" });
 
+    } else if (text === "/outreach") {
+      const s = require("./outreach").summary();
+      await bot.sendMessage(msg.chat.id,
+        `<b>Outreach</b>\n\n` +
+        `To review: ${s.review}\nQueued: ${s.queue}\nSent today: ${s.sentToday}/${s.cap}\n` +
+        `Companies emailed: ${s.companies} (${s.emailsSent} emails)\nReplies: ${s.replied} · interested: ${s.interested}\n` +
+        `Still to look up: ${s.toLookUp}\n\n/review to approve drafts here`,
+        { parse_mode: "HTML" }
+      );
+
+    } else if (text === "/review") {
+      const drafts = require("./outreach").nextDrafts(5);
+      if (drafts.length === 0) {
+        await bot.sendMessage(msg.chat.id, "Nothing to review right now.");
+        return;
+      }
+      for (const d of drafts) await sendDraftCard(d);
+
     } else if (text === "/help") {
       await bot.sendMessage(msg.chat.id,
         `<b>Job Hunter Commands</b>\n\n` +
         `/status - Stats overview\n` +
         `/priority - Top priority jobs\n` +
         `/recent - 10 most recent jobs\n` +
+        `/outreach - Cold email stats\n` +
+        `/review - Approve or skip email drafts\n` +
         `/help - This message`,
         { parse_mode: "HTML" }
       );
     }
   });
+
+  // Approve / Skip buttons on draft cards.
+  bot.on("callback_query", async (q) => {
+    if (String(q.message?.chat.id) !== String(chatId)) return;
+    const [action, id] = (q.data || "").split(":");
+    const status = { oa: "approved", os: "skipped" }[action];
+    if (!status) return;
+    const changed = require("./outreach").moveRows([Number(id)], status);
+    const label = changed ? (status === "approved" ? "✅ Approved — queued to send" : "⏭ Skipped") : "Already handled in the app";
+    try {
+      await bot.answerCallbackQuery(q.id, { text: label });
+      await bot.editMessageReplyMarkup({ inline_keyboard: [] }, { chat_id: q.message.chat.id, message_id: q.message.message_id });
+      await bot.sendMessage(q.message.chat.id, label, { reply_to_message_id: q.message.message_id });
+    } catch (err) {
+      console.error(`[Telegram] callback failed: ${err.message}`);
+    }
+  });
+}
+
+async function sendDraftCard(d) {
+  const body = d.body.length > 1500 ? d.body.slice(0, 1500) + "…" : d.body;
+  await bot.sendMessage(process.env.TELEGRAM_CHAT_ID,
+    `<b>${esc(d.company)}</b> · ${esc(d.city || "")}\n` +
+    `To: ${esc(d.email)}${d.kind !== "first" ? ` · <i>${esc(d.kind)}</i>` : ""}\n` +
+    (d.website ? `${esc(d.website)}\n` : "") +
+    `\n<b>${esc(d.subject)}</b>\n${esc(body)}`,
+    {
+      parse_mode: "HTML",
+      disable_web_page_preview: true,
+      reply_markup: { inline_keyboard: [[
+        { text: "✅ Approve", callback_data: `oa:${d.id}` },
+        { text: "⏭ Skip", callback_data: `os:${d.id}` },
+      ]] },
+    }
+  );
 }
 
 async function sendAlert(message) {

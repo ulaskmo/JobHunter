@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Outreach · Job Hunter</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <div class="header-content">
+      <h1>Job<span>Hunter</span></h1>
+      <div class="header-stats" id="headerStats"></div>
+      <div class="header-actions">
+        <a href="/" class="btn-link">Jobs</a>
+        <a href="/outreach.html" class="btn-link active-link">Outreach</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="main-layout">
+    <div class="panel panel-left">
+      <div class="panel-header">
+        <div class="tabs">
+          <button class="tab active" data-list="review" onclick="setList('review')">Review <span class="n" id="n-review">0</span></button>
+          <button class="tab" data-list="queue" onclick="setList('queue')">Queue <span class="n" id="n-queue">0</span></button>
+          <button class="tab" data-list="sent" onclick="setList('sent')">Sent <span class="n" id="n-sent">0</span></button>
+          <button class="tab" data-list="replied" onclick="setList('replied')">Replies <span class="n" id="n-replied">0</span></button>
+          <button class="tab" data-list="manual" onclick="setList('manual')" title="Website found but no usable email — apply on their careers page or paste an address">No email <span class="n" id="n-manual">0</span></button>
+          <button class="tab" data-list="other" onclick="setList('other')" title="Not looked up yet, no website, or skipped">Other <span class="n" id="n-other">0</span></button>
+        </div>
+        <span class="panel-count" id="listCount">0</span>
+      </div>
+      <div class="filters bulk" id="bulkBar">
+        <label><input type="checkbox" id="selectAll" onchange="toggleAll(this.checked)"> Select all</label>
+        <button class="btn-apply" onclick="bulk('approved')">Approve selected</button>
+        <button class="btn-hide" onclick="bulk('skipped')">Skip selected</button>
+      </div>
+      <div id="list" class="jobs-list"><div class="loading">Loading…</div></div>
+    </div>
+
+    <div class="panel panel-right">
+      <div class="panel-header"><h2>Stats</h2><span class="panel-count" id="sendState"></span></div>
+      <div class="ostats">
+        <div class="kpis" id="kpis"></div>
+        <div class="section-label">Sent per day (last 14 days)</div>
+        <div class="bars" id="bars"></div>
+        <div class="section-label">By city</div>
+        <table class="city-table" id="cities"></table>
+        <div class="detail-actions">
+          <button onclick="discoverNow()">Find companies now</button>
+          <button onclick="checkReplies()">Check replies</button>
+          <button onclick="sendTest()" title="Sends one draft to your own address">Send test email</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="editModal" class="modal" onclick="if(event.target===this)closeEdit()">
+    <div class="modal-content">
+      <span class="close" onclick="closeEdit()">&times;</span>
+      <h2 id="editTitle"></h2>
+      <div class="detail-company" id="editMeta"></div>
+      <div class="section-label">To</div>
+      <input id="editEmail" class="field" list="foundEmails" title="Pick another address found on their site, or type one">
+      <datalist id="foundEmails"></datalist>
+      <div class="section-label">Subject</div>
+      <input id="editSubject" class="field">
+      <div class="section-label">Message (CV is attached automatically)</div>
+      <textarea id="editBody" class="field" rows="18"></textarea>
+      <div class="detail-actions">
+        <button class="btn-apply" onclick="saveEdit(true)">Save &amp; approve</button>
+        <button onclick="saveEdit(false)">Save</button>
+        <button id="langBtn" onclick="switchLang()" title="Rewrites the message in the other language"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"><span id="toastText"></span><button id="toastUndo">Undo</button></div>
+  <script src="/js/outreach.js"></script>
+</body>
+</html>

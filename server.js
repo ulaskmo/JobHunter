@@ -21,6 +21,7 @@ const { scrapeWorkable } = require("./scrapers/workable");
 const { scrapeIndeed } = require("./scrapers/indeed");
 const { scrapeLinkedInAbroad, enrichLinkedInDescriptions } = require("./scrapers/linkedin_tr");
 const { initTelegram, sendAlert, notifyPriorityJobs, stopTelegram } = require("./telegram");
+const outreach = require("./outreach");
 
 // Rotate server.log if it's grown past 5 MB
 try {
@@ -35,6 +36,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
+app.use("/api/outreach", outreach.router);
 
 // Serve CV for download
 app.get("/api/cv", (req, res) => {
@@ -308,6 +310,7 @@ async function runAllScrapers({ onlySource } = {}) {
 // ─── Start ────────────────────────────────────────────────────────────────────
 let httpServer;
 let cronJob;
+let stopOutreach;
 
 async function start() {
   initTelegram();
@@ -315,6 +318,8 @@ async function start() {
   httpServer = app.listen(PORT, () => {
     console.log(`\n  Job Hunter Dashboard: http://localhost:${PORT}\n`);
   });
+
+  stopOutreach = outreach.startOutreach({ alert: sendAlert });
 
   console.log("Running initial scrape...");
   await runAllScrapers();
@@ -339,6 +344,7 @@ async function shutdown(signal) {
   console.log(`\nReceived ${signal}, shutting down...`);
 
   if (cronJob) { try { cronJob.stop(); } catch (e) {} }
+  if (stopOutreach) { try { stopOutreach(); } catch (e) {} }
   if (httpServer) { await new Promise((r) => httpServer.close(() => r())); }
   try { await stopTelegram(); } catch (e) {}
   try { db.pragma("wal_checkpoint(TRUNCATE)"); } catch (e) {}
